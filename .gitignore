@@ -1,0 +1,10 @@
+# Environment files with sensitive credentials
+.env
+.env.*
+!.env.example
+
+# Temporary backup files
+*.sql
+*.sql.gz
+/backups/
+/logs/
