@@ -56,6 +56,16 @@ echo "   Server: ${VPS_USER}@${VPS_IP}:${VPS_PORT}"
 echo "   Path: ${DEPLOY_DIR}"
 echo "=============================================================================="
 
+# 0. Sinkronisasi DNS Cloudflare Otomatis (Jika Kredensial Tersedia)
+if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+  echo "🌐 0. Memeriksa dan menyinkronkan DNS Cloudflare..."
+  bash "${SCRIPT_DIR}/sync-cloudflare-dns.sh" "${TARGET_ENV}" || {
+    echo "⚠️  Peringatan: Sinkronisasi DNS Cloudflare gagal, melanjutkan proses deployment aplikasi..."
+  }
+else
+  echo "ℹ️  CLOUDFLARE_API_TOKEN tidak diatur di .env. Melewati sinkronisasi DNS otomatis."
+fi
+
 # 1. Build Main Service Secara Lokal
 echo "🔨 1. Membangun Main Service secara lokal..."
 cd "${ROOT_DIR}/april-eyewear-main-service"
