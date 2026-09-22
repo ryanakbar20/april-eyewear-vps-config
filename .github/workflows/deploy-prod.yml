@@ -1,0 +1,92 @@
+name: Deploy to Production VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build & Zero-Downtime Deploy to Prod VPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Install Dependencies & Build
+        run: |
+          npm ci
+          if [ -d "prisma" ]; then
+            npx prisma generate
+          fi
+          npm run build
+
+      - name: 4. Setup SSH Agent & Deploy Key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_SSH_KEY }}
+
+      - name: 5. Add VPS to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${{ secrets.PROD_SSH_PORT || 22 }} -H ${{ secrets.PROD_VPS_IP }} >> ~/.ssh/known_hosts
+
+      - name: 6. Sync Artifacts to VPS
+        env:
+          VPS_USER: ${{ secrets.PROD_VPS_USER || 'ubuntu' }}
+          VPS_IP: ${{ secrets.PROD_VPS_IP }}
+          PORT: ${{ secrets.PROD_SSH_PORT || 22 }}
+          APP_NAME: ${{ github.event.repository.name }}
+        run: |
+          rsync -avz -e "ssh -p ${PORT}" --delete \
+            --exclude 'node_modules' \
+            --exclude '.git' \
+            --exclude 'src' \
+            --exclude 'test' \
+            dist package.json package-lock.json $([ -d "prisma" ] && echo "prisma" || true) \
+            "${VPS_USER}@${VPS_IP}:/var/www/april-eyewear/${APP_NAME}/"
+
+      - name: 7. Remote Post-Deploy (Prisma Migrate & PM2 Reload)
+        env:
+          VPS_USER: ${{ secrets.PROD_VPS_USER || 'ubuntu' }}
+          VPS_IP: ${{ secrets.PROD_VPS_IP }}
+          PORT: ${{ secrets.PROD_SSH_PORT || 22 }}
+          APP_NAME: ${{ github.event.repository.name }}
+        run: |
+          ssh -p ${PORT} "${VPS_USER}@${VPS_IP}" << 'EOF'
+            set -e
+            cd "/var/www/april-eyewear/${{ env.APP_NAME }}"
+            npm install --omit=dev --no-audit --no-fund
+            if [ -d "prisma" ]; then
+              npx prisma migrate deploy
+            fi
+            pm2 reload /var/www/april-eyewear/ecosystem.config.js --update-env || pm2 start /var/www/april-eyewear/ecosystem.config.js
+            pm2 save
+            echo "✅ Deployment completed successfully!"
+          EOF
+
+      - name: 8. Send Discord Notification (Success)
+        if: success() && env.DISCORD_WEBHOOK != ''
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -s -H "Content-Type: application/json" -X POST \
+            -d '{"embeds":[{"title":"✅ Production Deploy Selesai","description":"Commit `${{ github.sha }}` berhasil di-deploy ke VPS Production.","color":3066993}]}' \
+            "$DISCORD_WEBHOOK" || true
+
+      - name: 9. Send Discord Notification (Failure)
+        if: failure() && env.DISCORD_WEBHOOK != ''
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -s -H "Content-Type: application/json" -X POST \
+            -d '{"embeds":[{"title":"❌ Production Deploy Gagal","description":"Workflow deploy gagal pada commit `${{ github.sha }}`. Silakan periksa log GitHub Actions.","color":15158332}]}' \
+            "$DISCORD_WEBHOOK" || true

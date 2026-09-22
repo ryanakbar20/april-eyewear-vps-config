@@ -135,3 +135,7 @@ EOF
 echo "=============================================================================="
 echo "✅ Deployment ke ${TARGET_ENV} Sukses Berjalan!"
 echo "=============================================================================="
+
+if [ -f "${SCRIPT_DIR}/notify.sh" ]; then
+  bash "${SCRIPT_DIR}/notify.sh" success "Deployment Berhasil [${TARGET_ENV}]" "Aplikasi April Eyewear (Main & Shipment) berhasil di-deploy ke ${VPS_IP} dan PM2 telah di-reload."
+fi
