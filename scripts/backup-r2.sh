@@ -24,11 +24,13 @@ if [ "$TARGET_ENV" = "prod" ]; then
   VPS_IP="${PROD_VPS_IP}"
   VPS_PORT="${PROD_VPS_PORT:-22}"
   VPS_USER="${PROD_VPS_USER:-ubuntu}"
+  VPS_SSH_KEY="${PROD_VPS_SSH_KEY_PATH}"
   DB_NAME="${PROD_DB_NAME:-april_eyewear_db}"
 else
   VPS_IP="${DEV_VPS_IP}"
   VPS_PORT="${DEV_VPS_PORT:-22}"
   VPS_USER="${DEV_VPS_USER:-ubuntu}"
+  VPS_SSH_KEY="${DEV_VPS_SSH_KEY_PATH}"
   DB_NAME="${DEV_DB_NAME:-april_dev_db}"
 fi
 
@@ -37,14 +39,36 @@ if [ -z "$VPS_IP" ]; then
   exit 1
 fi
 
+# Resolusi path SSH Private Key
+VPS_SSH_KEY="${VPS_SSH_KEY/#\~/$HOME}"
+if [ -n "$VPS_SSH_KEY" ] && [[ "$VPS_SSH_KEY" != /* ]]; then
+  VPS_SSH_KEY="${CONFIG_DIR}/${VPS_SSH_KEY}"
+fi
+
+# Fallback auto-detection jika file key tidak ditemukan
+if [ -z "$VPS_SSH_KEY" ] || [ ! -f "$VPS_SSH_KEY" ]; then
+  if [ -f "${CONFIG_DIR}/scripts/id_rsa.pem" ]; then
+    VPS_SSH_KEY="${CONFIG_DIR}/scripts/id_rsa.pem"
+  elif [ -f "${CONFIG_DIR}/id_rsa.pem" ]; then
+    VPS_SSH_KEY="${CONFIG_DIR}/id_rsa.pem"
+  fi
+fi
+
+SSH_KEY_OPT=""
+if [ -n "$VPS_SSH_KEY" ] && [ -f "$VPS_SSH_KEY" ]; then
+  chmod 600 "$VPS_SSH_KEY" 2>/dev/null || true
+  SSH_KEY_OPT="-i ${VPS_SSH_KEY}"
+fi
+
 BUCKET="${R2_BUCKET_BACKUP:-april-eyewear-backups}"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_FILENAME="${DB_NAME}_${TIMESTAMP}.sql.gz"
-SSH_CMD="ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_IP}"
+SSH_CMD="ssh -p ${VPS_PORT} ${SSH_KEY_OPT} ${VPS_USER}@${VPS_IP}"
 
 echo "=============================================================================="
 echo "📦 Memulai Backup Database [${DB_NAME}] -> Cloudflare R2 (${BUCKET})"
-echo "   Server: ${VPS_USER}@${VPS_IP}:${VPS_PORT}"
+echo "   Server:  ${VPS_USER}@${VPS_IP}:${VPS_PORT}"
+[ -n "$VPS_SSH_KEY" ] && echo "   SSH Key: ${VPS_SSH_KEY}"
 echo "=============================================================================="
 
 # Jalankan dump & upload langsung di server target

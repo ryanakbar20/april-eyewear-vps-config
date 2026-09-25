@@ -25,11 +25,13 @@ if [ "$TARGET_ENV" = "prod" ]; then
   VPS_IP="${PROD_VPS_IP}"
   VPS_PORT="${PROD_VPS_PORT:-22}"
   VPS_USER="${PROD_VPS_USER:-ubuntu}"
+  VPS_SSH_KEY="${PROD_VPS_SSH_KEY_PATH}"
   DOMAIN="${PROD_API_DOMAIN:-api.aprileyewear.com}"
 else
   VPS_IP="${DEV_VPS_IP}"
   VPS_PORT="${DEV_VPS_PORT:-22}"
   VPS_USER="${DEV_VPS_USER:-ubuntu}"
+  VPS_SSH_KEY="${DEV_VPS_SSH_KEY_PATH}"
   DOMAIN="${DEV_API_DOMAIN:-dev-api.aprileyewear.com}"
 fi
 
@@ -38,11 +40,34 @@ if [ -z "$VPS_IP" ]; then
   exit 1
 fi
 
-SSH_CMD="ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_IP}"
+# Resolusi path SSH Private Key
+VPS_SSH_KEY="${VPS_SSH_KEY/#\~/$HOME}"
+if [ -n "$VPS_SSH_KEY" ] && [[ "$VPS_SSH_KEY" != /* ]]; then
+  VPS_SSH_KEY="${CONFIG_DIR}/${VPS_SSH_KEY}"
+fi
+
+# Fallback auto-detection jika file key tidak ditemukan
+if [ -z "$VPS_SSH_KEY" ] || [ ! -f "$VPS_SSH_KEY" ]; then
+  if [ -f "${CONFIG_DIR}/scripts/id_rsa.pem" ]; then
+    VPS_SSH_KEY="${CONFIG_DIR}/scripts/id_rsa.pem"
+  elif [ -f "${CONFIG_DIR}/id_rsa.pem" ]; then
+    VPS_SSH_KEY="${CONFIG_DIR}/id_rsa.pem"
+  fi
+fi
+
+SSH_KEY_OPT=""
+if [ -n "$VPS_SSH_KEY" ] && [ -f "$VPS_SSH_KEY" ]; then
+  chmod 600 "$VPS_SSH_KEY" 2>/dev/null || true
+  SSH_KEY_OPT="-i ${VPS_SSH_KEY}"
+fi
+
+SSH_CMD="ssh -p ${VPS_PORT} ${SSH_KEY_OPT} ${VPS_USER}@${VPS_IP}"
+SCP_CMD="scp -P ${VPS_PORT} ${SSH_KEY_OPT}"
 
 echo "=============================================================================="
 echo "🔒 Memulai Konfigurasi SSL/HTTPS untuk [${DOMAIN}] di server ${VPS_IP}"
-echo "   Metode: ${SSL_TYPE}"
+[ -n "$VPS_SSH_KEY" ] && echo "   SSH Key: ${VPS_SSH_KEY}"
+echo "   Metode:  ${SSL_TYPE}"
 echo "=============================================================================="
 
 if [ "$SSL_TYPE" = "letsencrypt" ]; then
@@ -81,8 +106,8 @@ elif [ "$SSL_TYPE" = "cloudflare" ]; then
   fi
 
   echo "📤 Mengirim Cloudflare Origin Certificate ke server..."
-  scp -P "${VPS_PORT}" "${CERT_FILE}" "${VPS_USER}@${VPS_IP}:/tmp/aprileyewear_origin.pem"
-  scp -P "${VPS_PORT}" "${KEY_FILE}" "${VPS_USER}@${VPS_IP}:/tmp/aprileyewear_origin.key"
+  $SCP_CMD "${CERT_FILE}" "${VPS_USER}@${VPS_IP}:/tmp/aprileyewear_origin.pem"
+  $SCP_CMD "${KEY_FILE}" "${VPS_USER}@${VPS_IP}:/tmp/aprileyewear_origin.key"
 
   $SSH_CMD << 'EOF'
     set -e

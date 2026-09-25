@@ -28,6 +28,7 @@ if [ "$TARGET_ENV" = "prod" ]; then
   VPS_IP="${PROD_VPS_IP}"
   VPS_PORT="${PROD_VPS_PORT:-22}"
   VPS_USER="${PROD_VPS_USER:-ubuntu}"
+  VPS_SSH_KEY="${PROD_VPS_SSH_KEY_PATH}"
   DEPLOY_DIR="${PROD_DEPLOY_DIR:-/var/www/april-eyewear}"
   ECOSYSTEM_FILE="prod/ecosystem.config.js"
   REMOTE_ECOSYSTEM="ecosystem.config.js"
@@ -35,6 +36,7 @@ elif [ "$TARGET_ENV" = "dev" ]; then
   VPS_IP="${DEV_VPS_IP}"
   VPS_PORT="${DEV_VPS_PORT:-22}"
   VPS_USER="${DEV_VPS_USER:-ubuntu}"
+  VPS_SSH_KEY="${DEV_VPS_SSH_KEY_PATH}"
   DEPLOY_DIR="${DEV_DEPLOY_DIR:-/var/www/april-eyewear-dev}"
   ECOSYSTEM_FILE="dev/ecosystem.dev.config.js"
   REMOTE_ECOSYSTEM="ecosystem.dev.config.js"
@@ -48,12 +50,36 @@ if [ -z "$VPS_IP" ]; then
   exit 1
 fi
 
-SSH_CMD="ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_IP}"
+# Resolusi path SSH Private Key
+VPS_SSH_KEY="${VPS_SSH_KEY/#\~/$HOME}"
+if [ -n "$VPS_SSH_KEY" ] && [[ "$VPS_SSH_KEY" != /* ]]; then
+  VPS_SSH_KEY="${CONFIG_DIR}/${VPS_SSH_KEY}"
+fi
+
+# Fallback auto-detection jika file key tidak ditemukan
+if [ -z "$VPS_SSH_KEY" ] || [ ! -f "$VPS_SSH_KEY" ]; then
+  if [ -f "${CONFIG_DIR}/scripts/id_rsa.pem" ]; then
+    VPS_SSH_KEY="${CONFIG_DIR}/scripts/id_rsa.pem"
+  elif [ -f "${CONFIG_DIR}/id_rsa.pem" ]; then
+    VPS_SSH_KEY="${CONFIG_DIR}/id_rsa.pem"
+  fi
+fi
+
+SSH_KEY_OPT=""
+if [ -n "$VPS_SSH_KEY" ] && [ -f "$VPS_SSH_KEY" ]; then
+  chmod 600 "$VPS_SSH_KEY" 2>/dev/null || true
+  SSH_KEY_OPT="-i ${VPS_SSH_KEY}"
+fi
+
+SSH_CMD="ssh -p ${VPS_PORT} ${SSH_KEY_OPT} ${VPS_USER}@${VPS_IP}"
+RSYNC_SSH="ssh -p ${VPS_PORT} ${SSH_KEY_OPT}"
+SCP_CMD="scp -P ${VPS_PORT} ${SSH_KEY_OPT}"
 
 echo "=============================================================================="
 echo "🚀 Memulai Deployment April Eyewear [Target: ${TARGET_ENV}]"
-echo "   Server: ${VPS_USER}@${VPS_IP}:${VPS_PORT}"
-echo "   Path: ${DEPLOY_DIR}"
+echo "   Server:  ${VPS_USER}@${VPS_IP}:${VPS_PORT}"
+[ -n "$VPS_SSH_KEY" ] && echo "   SSH Key: ${VPS_SSH_KEY}"
+echo "   Path:    ${DEPLOY_DIR}"
 echo "=============================================================================="
 
 # 0. Sinkronisasi DNS Cloudflare Otomatis (Jika Kredensial Tersedia)
@@ -79,51 +105,83 @@ cd "${ROOT_DIR}/april-eyewear-shipment-service"
 npm ci
 npm run build
 
-# 3. Pastikan Direktori Remote Tersedia
+# 3. Pastikan Direktori Remote Tersedia & Permission Benar
 echo "📁 3. Menyiapkan folder tujuan di VPS..."
-$SSH_CMD "mkdir -p ${DEPLOY_DIR}/april-eyewear-main-service ${DEPLOY_DIR}/april-eyewear-shipment-service /var/log/pm2"
+$SSH_CMD "sudo mkdir -p ${DEPLOY_DIR} /var/log/pm2 && sudo chown -R ${VPS_USER}:${VPS_USER} ${DEPLOY_DIR} /var/log/pm2 && mkdir -p ${DEPLOY_DIR}/april-eyewear-main-service ${DEPLOY_DIR}/april-eyewear-shipment-service"
 
 # 4. Sync Main Service Artifacts
 echo "📤 4. Mengirim artefak Main Service ke VPS..."
-rsync -avz -e "ssh -p ${VPS_PORT}" --delete \
+rsync -avz -e "${RSYNC_SSH}" --delete \
   --exclude 'node_modules' \
   --exclude '.git' \
-  --exclude 'src' \
-  --exclude 'test' \
   "${ROOT_DIR}/april-eyewear-main-service/dist" \
   "${ROOT_DIR}/april-eyewear-main-service/package.json" \
   "${ROOT_DIR}/april-eyewear-main-service/package-lock.json" \
   "${ROOT_DIR}/april-eyewear-main-service/prisma" \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/"
 
+# Siapkan .env Main Service di remote jika belum ada
+if [ -f "${ROOT_DIR}/april-eyewear-main-service/.env" ]; then
+  echo "⚙️  Menyiapkan .env Main Service untuk lingkungan ${TARGET_ENV}..."
+  TMP_MAIN_ENV=$(mktemp)
+  cp "${ROOT_DIR}/april-eyewear-main-service/.env" "$TMP_MAIN_ENV"
+  if [ "$TARGET_ENV" = "dev" ]; then
+    sed -i '' "s|DATABASE_URL=.*|DATABASE_URL=\"postgresql://${DEV_DB_USER:-postgres}:${DEV_DB_PASSWORD:-PasswordDatabaseKuat123!}@localhost:${DEV_DB_PORT:-5432}/${DEV_DB_NAME:-april_dev_db}?schema=public\"|g" "$TMP_MAIN_ENV" 2>/dev/null || \
+    sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"postgresql://${DEV_DB_USER:-postgres}:${DEV_DB_PASSWORD:-PasswordDatabaseKuat123!}@localhost:${DEV_DB_PORT:-5432}/${DEV_DB_NAME:-april_dev_db}?schema=public\"|g" "$TMP_MAIN_ENV"
+  fi
+  $SCP_CMD "$TMP_MAIN_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/.env"
+  rm -f "$TMP_MAIN_ENV"
+fi
+
 # 5. Sync Shipment Service Artifacts
 echo "📤 5. Mengirim artefak Shipment Service ke VPS..."
-rsync -avz -e "ssh -p ${VPS_PORT}" --delete \
+rsync -avz -e "${RSYNC_SSH}" --delete \
   --exclude 'node_modules' \
   --exclude '.git' \
-  --exclude 'src' \
-  --exclude 'test' \
   "${ROOT_DIR}/april-eyewear-shipment-service/dist" \
   "${ROOT_DIR}/april-eyewear-shipment-service/package.json" \
   "${ROOT_DIR}/april-eyewear-shipment-service/package-lock.json" \
+  "${ROOT_DIR}/april-eyewear-shipment-service/prisma" \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/"
 
-# 6. Kirim PM2 Ecosystem Config
+# Siapkan .env Shipment Service di remote
+if [ -f "${ROOT_DIR}/april-eyewear-shipment-service/.env" ]; then
+  echo "⚙️  Menyiapkan .env Shipment Service untuk lingkungan ${TARGET_ENV}..."
+  TMP_SHIP_ENV=$(mktemp)
+  cp "${ROOT_DIR}/april-eyewear-shipment-service/.env" "$TMP_SHIP_ENV"
+  if [ "$TARGET_ENV" = "dev" ]; then
+    sed -i '' "s|DATABASE_URL=.*|DATABASE_URL=\"postgresql://${DEV_DB_USER:-postgres}:${DEV_DB_PASSWORD:-PasswordDatabaseKuat123!}@localhost:${DEV_DB_PORT:-5432}/april_shipment_db?schema=public\"|g" "$TMP_SHIP_ENV" 2>/dev/null || \
+    sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"postgresql://${DEV_DB_USER:-postgres}:${DEV_DB_PASSWORD:-PasswordDatabaseKuat123!}@localhost:${DEV_DB_PORT:-5432}/april_shipment_db?schema=public\"|g" "$TMP_SHIP_ENV"
+  fi
+  $SCP_CMD "$TMP_SHIP_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/.env"
+  rm -f "$TMP_SHIP_ENV"
+fi
+
+# 6. Kirim PM2 Ecosystem Config & Nginx Config
 echo "📤 6. Mengirim file konfigurasi PM2..."
-scp -P "${VPS_PORT}" "${CONFIG_DIR}/${ECOSYSTEM_FILE}" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/${REMOTE_ECOSYSTEM}"
+$SCP_CMD "${CONFIG_DIR}/${ECOSYSTEM_FILE}" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/${REMOTE_ECOSYSTEM}"
+
+if [ "$TARGET_ENV" = "dev" ] && [ -f "${CONFIG_DIR}/dev/nginx-dev.conf" ]; then
+  echo "🌐 Mengonfigurasi Nginx Reverse Proxy di server..."
+  $SCP_CMD "${CONFIG_DIR}/dev/nginx-dev.conf" "${VPS_USER}@${VPS_IP}:/tmp/nginx-dev.conf"
+  $SSH_CMD "sudo mv /tmp/nginx-dev.conf /etc/nginx/sites-available/dev-api.aprileyewear.com && sudo ln -sf /etc/nginx/sites-available/dev-api.aprileyewear.com /etc/nginx/sites-enabled/ && sudo rm -f /etc/nginx/sites-enabled/default && sudo nginx -t && sudo systemctl reload nginx"
+fi
 
 # 7. Eksekusi Remote: Install Dependencies, Migrate, & Reload PM2
-echo "⚡ 7. Menginstal dependensi produksi & reload PM2 di server..."
+echo "⚡ 7. Menginstal dependensi produksi, migrasi database & reload PM2 di server..."
 $SSH_CMD << EOF
   set -e
-  echo "--> Installing production dependencies on Main Service..."
+  echo "--> Installing production dependencies & migrating Main Service..."
   cd ${DEPLOY_DIR}/april-eyewear-main-service
   npm install --omit=dev --no-audit --no-fund
-  npx prisma migrate deploy
+  npx prisma generate
+  npx prisma db push --accept-data-loss
 
-  echo "--> Installing production dependencies on Shipment Service..."
+  echo "--> Installing production dependencies & migrating Shipment Service..."
   cd ${DEPLOY_DIR}/april-eyewear-shipment-service
   npm install --omit=dev --no-audit --no-fund
+  npx prisma generate
+  npx prisma db push --accept-data-loss
 
   echo "--> Reloading PM2 services with zero downtime..."
   pm2 reload ${DEPLOY_DIR}/${REMOTE_ECOSYSTEM} --update-env || pm2 start ${DEPLOY_DIR}/${REMOTE_ECOSYSTEM}
@@ -133,7 +191,15 @@ $SSH_CMD << EOF
 EOF
 
 echo "=============================================================================="
+echo "🩺 Memeriksa Status Layanan Pasca-Deploy..."
+echo "=============================================================================="
+sleep 3
+$SSH_CMD "curl -s http://127.0.0.1:3000/api/v1/health || curl -s http://127.0.0.1:3000/ || true"
+echo ""
+
+echo "=============================================================================="
 echo "✅ Deployment ke ${TARGET_ENV} Sukses Berjalan!"
+echo "   Endpoint: http://${VPS_IP}/"
 echo "=============================================================================="
 
 if [ -f "${SCRIPT_DIR}/notify.sh" ]; then

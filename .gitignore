@@ -8,3 +8,9 @@
 *.sql.gz
 /backups/
 /logs/
+
+# Private keys & certificates
+*.pem
+*.key
+id_rsa*
+

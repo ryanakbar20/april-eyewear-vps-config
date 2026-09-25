@@ -29,11 +29,13 @@ if [ "$TARGET_ENV" = "prod" ]; then
   VPS_IP="${PROD_VPS_IP}"
   VPS_PORT="${PROD_VPS_PORT:-22}"
   VPS_USER="${PROD_VPS_USER:-ubuntu}"
+  VPS_SSH_KEY="${PROD_VPS_SSH_KEY_PATH}"
   DB_NAME="${PROD_DB_NAME:-april_eyewear_db}"
 elif [ "$TARGET_ENV" = "dev" ]; then
   VPS_IP="${DEV_VPS_IP}"
   VPS_PORT="${DEV_VPS_PORT:-22}"
   VPS_USER="${DEV_VPS_USER:-ubuntu}"
+  VPS_SSH_KEY="${DEV_VPS_SSH_KEY_PATH}"
   DB_NAME="${DEV_DB_NAME:-april_dev_db}"
 else
   echo "❌ Lingkungan target tidak valid: ${TARGET_ENV}. Gunakan 'prod' atau 'dev'."
@@ -45,11 +47,34 @@ if [ -z "$VPS_IP" ]; then
   exit 1
 fi
 
-SSH_CMD="ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_IP}"
+# Resolusi path SSH Private Key
+VPS_SSH_KEY="${VPS_SSH_KEY/#\~/$HOME}"
+if [ -n "$VPS_SSH_KEY" ] && [[ "$VPS_SSH_KEY" != /* ]]; then
+  VPS_SSH_KEY="${CONFIG_DIR}/${VPS_SSH_KEY}"
+fi
+
+# Fallback auto-detection jika file key tidak ditemukan
+if [ -z "$VPS_SSH_KEY" ] || [ ! -f "$VPS_SSH_KEY" ]; then
+  if [ -f "${CONFIG_DIR}/scripts/id_rsa.pem" ]; then
+    VPS_SSH_KEY="${CONFIG_DIR}/scripts/id_rsa.pem"
+  elif [ -f "${CONFIG_DIR}/id_rsa.pem" ]; then
+    VPS_SSH_KEY="${CONFIG_DIR}/id_rsa.pem"
+  fi
+fi
+
+SSH_KEY_OPT=""
+if [ -n "$VPS_SSH_KEY" ] && [ -f "$VPS_SSH_KEY" ]; then
+  chmod 600 "$VPS_SSH_KEY" 2>/dev/null || true
+  SSH_KEY_OPT="-i ${VPS_SSH_KEY}"
+fi
+
+SSH_CMD="ssh -p ${VPS_PORT} ${SSH_KEY_OPT} ${VPS_USER}@${VPS_IP}"
+SCP_CMD="scp -P ${VPS_PORT} ${SSH_KEY_OPT}"
 
 echo "=============================================================================="
 echo "⚠️  PERINGATAN: RESTORE DATABASE AKAN MENIMPA DATA SAAT INI!"
 echo "   Target Server: ${VPS_USER}@${VPS_IP}:${VPS_PORT}"
+[ -n "$VPS_SSH_KEY" ] && echo "   SSH Key:       ${VPS_SSH_KEY}"
 echo "   Database:      ${DB_NAME}"
 echo "   Sumber Backup: ${BACKUP_SOURCE}"
 echo "=============================================================================="
@@ -67,7 +92,7 @@ if [ -f "$BACKUP_SOURCE" ]; then
   echo "📤 Mengunggah file backup lokal (${BACKUP_SOURCE}) ke server..."
   REMOTE_BACKUP_FILE="/tmp/backups/restore_$(basename ${BACKUP_SOURCE})"
   $SSH_CMD "mkdir -p /tmp/backups"
-  scp -P "${VPS_PORT}" "${BACKUP_SOURCE}" "${VPS_USER}@${VPS_IP}:${REMOTE_BACKUP_FILE}"
+  $SCP_CMD "${BACKUP_SOURCE}" "${VPS_USER}@${VPS_IP}:${REMOTE_BACKUP_FILE}"
 else
   # Mengambil snapshot terbaru yang ada di folder /tmp/backups VPS
   REMOTE_BACKUP_FILE=$($SSH_CMD "ls -t /tmp/backups/${DB_NAME}_*.sql.gz 2>/dev/null | head -n 1 || true")

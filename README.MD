@@ -69,11 +69,13 @@ CLOUDFLARE_API_TOKEN=your_cloudflare_dns_token
 # 3. Target VPS Production
 PROD_VPS_IP=103.xxx.xxx.xxx
 PROD_VPS_USER=ubuntu
+PROD_VPS_SSH_KEY_PATH=~/.ssh/id_rsa
 PROD_DB_PASSWORD=PasswordDatabaseKuat123!
 
 # 4. Target VPS Development
-DEV_VPS_IP=103.yyy.yyy.yyy
+DEV_VPS_IP=103.150.117.15
 DEV_VPS_USER=ubuntu
+DEV_VPS_SSH_KEY_PATH=./scripts/id_rsa.pem
 DEV_DB_PASSWORD=PasswordDatabaseDev123!
 ```
 
@@ -83,9 +85,9 @@ DEV_DB_PASSWORD=PasswordDatabaseDev123!
 
 Jalankan perintah ini **sekali saja** di VPS baru untuk memasang seluruh kebutuhan sistem:
 
-1. Login via SSH ke VPS:
+1. Login via SSH ke VPS (menggunakan file `.pem` jika otentikasi key diaktifkan):
    ```bash
-   ssh ubuntu@<IP_VPS>
+   ssh -i scripts/id_rsa.pem ubuntu@103.150.117.15
    ```
 
 2. Jalankan skrip setup otomatis:
