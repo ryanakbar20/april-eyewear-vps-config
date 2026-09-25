@@ -120,17 +120,20 @@ rsync -avz -e "${RSYNC_SSH}" --delete \
   "${ROOT_DIR}/april-eyewear-main-service/prisma" \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/"
 
-# Siapkan .env Main Service di remote jika belum ada
-if [ -f "${ROOT_DIR}/april-eyewear-main-service/.env" ]; then
-  echo "⚙️  Menyiapkan .env Main Service untuk lingkungan ${TARGET_ENV}..."
-  TMP_MAIN_ENV=$(mktemp)
-  cp "${ROOT_DIR}/april-eyewear-main-service/.env" "$TMP_MAIN_ENV"
-  if [ "$TARGET_ENV" = "dev" ]; then
-    sed -i '' "s|DATABASE_URL=.*|DATABASE_URL=\"postgresql://${DEV_DB_USER:-postgres}:${DEV_DB_PASSWORD:-PasswordDatabaseKuat123!}@localhost:${DEV_DB_PORT:-5432}/${DEV_DB_NAME:-april_dev_db}?schema=public\"|g" "$TMP_MAIN_ENV" 2>/dev/null || \
-    sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"postgresql://${DEV_DB_USER:-postgres}:${DEV_DB_PASSWORD:-PasswordDatabaseKuat123!}@localhost:${DEV_DB_PORT:-5432}/${DEV_DB_NAME:-april_dev_db}?schema=public\"|g" "$TMP_MAIN_ENV"
+# Siapkan .env Main Service di remote
+TARGET_MAIN_ENV="${CONFIG_DIR}/${TARGET_ENV}/main.env"
+if [ -f "$TARGET_MAIN_ENV" ]; then
+  echo "⚙️  Mengunggah .env Main Service dari ${TARGET_ENV}/main.env..."
+  $SCP_CMD "$TARGET_MAIN_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/.env"
+else
+  REMOTE_HAS_MAIN_ENV=$($SSH_CMD "[ -f ${DEPLOY_DIR}/april-eyewear-main-service/.env ] && echo 'YES' || echo 'NO'")
+  if [ "$REMOTE_HAS_MAIN_ENV" = "NO" ]; then
+    echo "❌ File konfigurasi ${TARGET_ENV}/main.env tidak ditemukan di lokal dan belum ada di VPS!"
+    echo "   Salin ${TARGET_ENV}/main.env.example menjadi ${TARGET_ENV}/main.env dan sesuaikan nilainya."
+    exit 1
+  else
+    echo "ℹ️  Menggunakan .env Main Service yang sudah ada di server."
   fi
-  $SCP_CMD "$TMP_MAIN_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/.env"
-  rm -f "$TMP_MAIN_ENV"
 fi
 
 # 5. Sync Shipment Service Artifacts
@@ -145,16 +148,19 @@ rsync -avz -e "${RSYNC_SSH}" --delete \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/"
 
 # Siapkan .env Shipment Service di remote
-if [ -f "${ROOT_DIR}/april-eyewear-shipment-service/.env" ]; then
-  echo "⚙️  Menyiapkan .env Shipment Service untuk lingkungan ${TARGET_ENV}..."
-  TMP_SHIP_ENV=$(mktemp)
-  cp "${ROOT_DIR}/april-eyewear-shipment-service/.env" "$TMP_SHIP_ENV"
-  if [ "$TARGET_ENV" = "dev" ]; then
-    sed -i '' "s|DATABASE_URL=.*|DATABASE_URL=\"postgresql://${DEV_DB_USER:-postgres}:${DEV_DB_PASSWORD:-PasswordDatabaseKuat123!}@localhost:${DEV_DB_PORT:-5432}/april_shipment_db?schema=public\"|g" "$TMP_SHIP_ENV" 2>/dev/null || \
-    sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"postgresql://${DEV_DB_USER:-postgres}:${DEV_DB_PASSWORD:-PasswordDatabaseKuat123!}@localhost:${DEV_DB_PORT:-5432}/april_shipment_db?schema=public\"|g" "$TMP_SHIP_ENV"
+TARGET_SHIP_ENV="${CONFIG_DIR}/${TARGET_ENV}/shipment.env"
+if [ -f "$TARGET_SHIP_ENV" ]; then
+  echo "⚙️  Mengunggah .env Shipment Service dari ${TARGET_ENV}/shipment.env..."
+  $SCP_CMD "$TARGET_SHIP_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/.env"
+else
+  REMOTE_HAS_SHIP_ENV=$($SSH_CMD "[ -f ${DEPLOY_DIR}/april-eyewear-shipment-service/.env ] && echo 'YES' || echo 'NO'")
+  if [ "$REMOTE_HAS_SHIP_ENV" = "NO" ]; then
+    echo "❌ File konfigurasi ${TARGET_ENV}/shipment.env tidak ditemukan di lokal dan belum ada di VPS!"
+    echo "   Salin ${TARGET_ENV}/shipment.env.example menjadi ${TARGET_ENV}/shipment.env dan sesuaikan nilainya."
+    exit 1
+  else
+    echo "ℹ️  Menggunakan .env Shipment Service yang sudah ada di server."
   fi
-  $SCP_CMD "$TMP_SHIP_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/.env"
-  rm -f "$TMP_SHIP_ENV"
 fi
 
 # 6. Kirim PM2 Ecosystem Config & Nginx Config

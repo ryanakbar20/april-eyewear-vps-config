@@ -79,6 +79,30 @@ DEV_VPS_SSH_KEY_PATH=./scripts/id_rsa.pem
 DEV_DB_PASSWORD=PasswordDatabaseDev123!
 ```
 
+### Menyiapkan Environment Service (Main & Shipment) untuk Dev & Prod
+Setiap service (`main-service` dan `shipment-service`) memiliki variabel kredensial yang berbeda antara **Dev** dan **Prod** (seperti database URL, payment gateway sandbox vs production, biteship API key, dan URL callback).
+
+File konfigurasi disimpan di dalam folder masing-masing lingkungan:
+
+```bash
+# 1. Konfigurasi Lingkungan Development (Otomatis dipakai saat ./scripts/deploy.sh dev)
+dev/
+├── main.env                 # Kredensial aktif Main Service Dev (Auto-deploy ke VPS Dev)
+├── main.env.example         # Template acuan variabel Main Service Dev
+├── shipment.env             # Kredensial aktif Shipment Service Dev (Auto-deploy ke VPS Dev)
+└── shipment.env.example     # Template acuan variabel Shipment Service Dev
+
+# 2. Konfigurasi Lingkungan Production (Otomatis dipakai saat ./scripts/deploy.sh prod)
+prod/
+├── main.env                 # Salin dari main.env.example dan isi kredensial live produksi
+├── main.env.example         # Template acuan variabel Main Service Prod
+├── shipment.env             # Salin dari shipment.env.example dan isi kredensial live produksi
+└── shipment.env.example     # Template acuan variabel Shipment Service Prod
+```
+
+> 🔒 **Keamanan:** File `*.env` di dalam folder `dev/` dan `prod/` sudah otomatis diabaikan oleh `.gitignore` sehingga aman dan tidak akan ter-commit ke GitHub.
+
+
 ---
 
 ## Langkah 2: Setup VPS Baru (Initial Provisioning)
