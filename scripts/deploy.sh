@@ -118,6 +118,7 @@ rsync -avz -e "${RSYNC_SSH}" --delete \
   "${ROOT_DIR}/april-eyewear-main-service/package.json" \
   "${ROOT_DIR}/april-eyewear-main-service/package-lock.json" \
   "${ROOT_DIR}/april-eyewear-main-service/prisma" \
+  $([ -d "${ROOT_DIR}/april-eyewear-main-service/scripts" ] && echo "${ROOT_DIR}/april-eyewear-main-service/scripts" || true) \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/"
 
 # Siapkan .env Main Service di remote
