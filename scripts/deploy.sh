@@ -13,6 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROOT_DIR="$(cd "${CONFIG_DIR}/.." && pwd)"
 
+# Pastikan Node & npm tersedia (nvm / Homebrew) agar proses build lokal dapat berjalan
+export PATH="$HOME/.nvm/versions/node/$(ls "$HOME/.nvm/versions/node" 2>/dev/null | tail -n 1)/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # Load .env
 if [ -f "${CONFIG_DIR}/.env" ]; then
   # Export non-comment lines
