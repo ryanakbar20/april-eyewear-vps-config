@@ -70,6 +70,7 @@ fi
 
 SSH_CMD="ssh -p ${VPS_PORT} ${SSH_KEY_OPT} ${VPS_USER}@${VPS_IP}"
 SCP_CMD="scp -P ${VPS_PORT} ${SSH_KEY_OPT}"
+BUCKET="${R2_BUCKET_BACKUP:-april-eyewear-backups}"
 
 echo "=============================================================================="
 echo "⚠️  PERINGATAN: RESTORE DATABASE AKAN MENIMPA DATA SAAT INI!"
@@ -94,14 +95,22 @@ if [ -f "$BACKUP_SOURCE" ]; then
   $SSH_CMD "mkdir -p /tmp/backups"
   $SCP_CMD "${BACKUP_SOURCE}" "${VPS_USER}@${VPS_IP}:${REMOTE_BACKUP_FILE}"
 else
-  # Mengambil snapshot terbaru yang ada di folder /tmp/backups VPS
-  REMOTE_BACKUP_FILE=$($SSH_CMD "ls -t /tmp/backups/${DB_NAME}_*.sql.gz 2>/dev/null | head -n 1 || true")
+  # Backup yang sebenarnya ada di R2, bukan di /tmp server - daftar /tmp/backups hanya dipakai
+  # sebagai cadangan kalau R2 tidak bisa diakses. Sebelumnya skrip ini hanya melihat /tmp, sehingga
+  # pada bencana nyata (VPS baru, /tmp kosong) file backup tidak pernah ditemukan.
+  LATEST_NAME="$($SSH_CMD "rclone lsf --files-only r2:${BUCKET}/database/ 2>/dev/null | grep '^${DB_NAME}_' | sort | tail -1")"
+  if [ -n "$LATEST_NAME" ]; then
+    echo "📥 Mengunduh snapshot terbaru dari R2: ${LATEST_NAME}"
+    REMOTE_BACKUP_FILE="$($SSH_CMD "mkdir -p /tmp/backups && rclone copy r2:${BUCKET}/database/${LATEST_NAME} /tmp/backups/ >/dev/null && echo /tmp/backups/${LATEST_NAME}")"
+  else
+    REMOTE_BACKUP_FILE=$($SSH_CMD "ls -t /tmp/backups/${DB_NAME}_*.sql.gz 2>/dev/null | head -n 1 || true")
+    [ -n "$REMOTE_BACKUP_FILE" ] && echo "📦 Memakai snapshot yang ada di server: ${REMOTE_BACKUP_FILE}"
+  fi
+
   if [ -z "$REMOTE_BACKUP_FILE" ]; then
-    echo "❌ Tidak ditemukan file backup snapshot di /tmp/backups/ pada server ${VPS_IP}!"
-    echo "💡 Pastikan Anda telah mengunduh backup dari Cloudflare R2 atau tentukan file lokal."
+    echo "❌ Tidak ada snapshot ${DB_NAME} di r2:${BUCKET}/database/ maupun di /tmp/backups/ server ${VPS_IP}!"
     exit 1
   fi
-  echo "📦 Menggunakan file backup snapshot terbaru di server: ${REMOTE_BACKUP_FILE}"
 fi
 
 # 2. Eksekusi Pemulihan di Server

@@ -17,7 +17,8 @@ Repositori ini berisi seluruh konfigurasi infrastruktur, skrip otomasi *provisio
 8. [Langkah 6: Memastikan Auto-Start Saat Server Reboot](#langkah-6-memastikan-auto-start-saat-server-reboot)
 9. [Langkah 7: Otomatisasi Backup Database ke Cloudflare R2](#langkah-7-otomatisasi-backup-database-ke-cloudflare-r2)
 10. [Langkah 8: Setup CI/CD Otomatis via GitHub Actions](#langkah-8-setup-cicd-otomatis-via-github-actions)
-11. [Cheat-Sheet Perintah Operasional Sehari-hari](#cheat-sheet-perintah-operasional-sehari-hari)
+11. [Langkah 9: Migrasi Database & Versi Node](#langkah-9-migrasi-database--versi-node)
+12. [Cheat-Sheet Perintah Operasional Sehari-hari](#cheat-sheet-perintah-operasional-sehari-hari)
 
 ---
 
@@ -232,23 +233,48 @@ Agar seluruh service otomatis bangkit kembali saat VPS di-restart:
 
 ## Langkah 7: Otomatisasi Backup Database ke Cloudflare R2
 
-Untuk mencadangkan database secara otomatis setiap hari pukul 02:00 dini hari ke Cloudflare R2:
+Backup berjalan **di dalam VPS** lewat cron, bukan dari laptop operator — script yang bergantung pada
+laptop yang menyala bukan backup.
 
-1. Di dalam VPS Anda, buka crontab:
-   ```bash
-   crontab -e
-   ```
+**Kondisi terpasang saat ini (dev):**
 
-2. Tambahkan baris jadwal berikut:
-   ```cron
-   0 2 * * * /bin/bash /var/www/april-eyewear/scripts/backup-r2.sh prod >> /var/log/backup.log 2>&1
-   ```
+| Komponen | Lokasi |
+| :--- | :--- |
+| Script backup | `/home/ubuntu/bin/db-backup.sh` (sumber: `scripts/server-backup-db.sh`) |
+| Jadwal | `crontab -l` → `0 3 * * * ... >> /home/ubuntu/logs/db-backup.log 2>&1` (03:00 WIB) |
+| Tujuan | `r2:april-eyewear-backups/database/`, retensi 14 hari; 3 file terbaru disimpan lokal di `/tmp/backups` |
+| Kredensial rclone | `~/.config/rclone/rclone.conf` (chmod 600) |
+| Webhook alert | `~/.config/april/notify.env` (chmod 600) — dikirim ke Discord kalau backup **GAGAL** |
 
-3. **Uji Coba Backup Manual:**
-   Anda dapat memicu backup kapan saja dari komputer lokal:
-   ```bash
-   ./scripts/backup-r2.sh prod
-   ```
+Script mendeteksi database secara otomatis dari `DATABASE_URL` tiap service yang ter-deploy, jadi
+satu script yang sama dipakai di dev dan prod tanpa menulis nama database di dalam kode.
+
+**Pemasangan di VPS baru:**
+```bash
+scp -i <key> scripts/server-backup-db.sh ubuntu@<ip>:/home/ubuntu/bin/db-backup.sh
+ssh -i <key> ubuntu@<ip> 'chmod +x ~/bin/db-backup.sh; mkdir -p ~/logs ~/.config/april'
+# daftarkan remote rclone 'r2' (variabel R2_* ada di .env repo ini)
+ssh -i <key> ubuntu@<ip> "(crontab -l 2>/dev/null; echo '0 3 * * * /home/ubuntu/bin/db-backup.sh >> /home/ubuntu/logs/db-backup.log 2>&1') | crontab -"
+```
+
+**Backup manual** (dari laptop, menjalankan script server yang sama):
+```bash
+./scripts/backup-r2.sh dev
+```
+
+**Membuktikan backup bisa dipulihkan** — jalankan berkala. Backup yang belum pernah di-restore belum
+bisa disebut backup:
+```bash
+ssh -i <key> ubuntu@<ip> '/home/ubuntu/bin/verify-restore.sh april_dev_db'
+```
+Script ini me-restore snapshot terbaru dari R2 ke database sementara, membandingkan jumlah tabel dan
+jumlah baris tabel utama dengan database aslinya, lalu **selalu menghapus** database sementara itu.
+
+**Pemulihan bencana penuh** (menimpa database, minta konfirmasi `YA`):
+```bash
+./scripts/restore-db.sh dev latest
+```
+Snapshot diambil dari R2, bukan dari `/tmp` server, sehingga tetap bisa dipakai di VPS yang baru.
 
 ---
 
@@ -273,6 +299,46 @@ Jika Anda ingin rilis otomatis terjadi setiap kali Anda melakukan `git push` ata
 
 ---
 
+## Langkah 9: Migrasi Database & Versi Node
+
+### Migrasi database (berversi)
+Deploy memakai `prisma migrate deploy` dengan riwayat di `prisma/migrations`. Sebelumnya memakai
+`prisma db push --accept-data-loss`, yang bisa menghapus kolom/tabel tanpa peringatan dan tidak punya
+jalan kembali.
+
+**Membuat migrasi baru** setelah mengubah `schema.prisma`:
+```bash
+cd april-eyewear-main-service
+npx prisma migrate dev --name nama_perubahan    # di lokal, menghasilkan file migrasi
+```
+Deploy berikutnya (`./scripts/deploy.sh dev|prod`) akan menerapkannya di server.
+
+**Database yang sudah berisi data tapi belum punya tabel `_prisma_migrations`** (schema lama hasil
+`db push`) perlu di-baseline sekali saja:
+```bash
+./scripts/baseline-migrations.sh dev     # atau prod
+```
+Database kosong tidak perlu langkah ini — `migrate deploy` membuat semuanya dari nol.
+
+Cek status kapan saja:
+```bash
+ssh -i <key> ubuntu@<ip> 'cd /var/www/april-eyewear-dev/april-eyewear-main-service && npx prisma migrate status'
+```
+
+### Versi Node
+API memakai paket yang mensyaratkan **Node >= 22** (`firebase-admin`, `@google-cloud/storage`).
+Server dev sudah memakai Node 22 (`node -v` → v22.x). Kalau versi Node turun ke 20, unggah media dan
+push notification akan gagal walau build tetap lolos (dulu hanya muncul peringatan `EBADENGINE`).
+
+Setelah mengubah versi Node, `node_modules` wajib dibangun ulang — `bcrypt` adalah native module dan
+binary-nya terikat ke ABI Node:
+```bash
+rm -rf node_modules && npm install --omit=dev
+```
+Verifikasi cepat bahwa native module sehat: `node -e "require('bcrypt').hash('uji',10).then(h=>console.log(h.length))"`.
+
+---
+
 ## Cheat-Sheet Perintah Operasional Sehari-hari
 
 Jalankan perintah ini langsung dari terminal lokal Anda di folder `april-eyewear-vps-config`:
@@ -285,6 +351,9 @@ Jalankan perintah ini langsung dari terminal lokal Anda di folder `april-eyewear
 | **Deploy Development** | `./scripts/deploy.sh dev` | Build lokal & deploy mode fork ke Dev. |
 | **Cek Healthcheck API** | `curl -s https://api.aprileyewear.com/api/v1/health` | Menampilkan latency database dan status memori backend. |
 | **Backup DB ke R2** | `./scripts/backup-r2.sh prod` | Dump PostgreSQL & push ke Cloudflare R2. |
+| **Uji Backup Bisa Di-restore** | `./scripts/server-verify-restore.sh` *(di VPS)* | Restore snapshot terbaru ke DB sementara, bandingkan jumlah tabel & baris, lalu hapus DB sementara. |
+| **Baseline Migrasi (sekali saja)** | `./scripts/baseline-migrations.sh dev` | Menandai `0_init` sebagai sudah diterapkan pada DB lama hasil `db push`. |
+| **Status Migrasi** | `ssh ... 'npx prisma migrate status'` | Memastikan tidak ada migrasi tertunda / drift. |
 | **Restore Database** | `./scripts/restore-db.sh prod latest` | Mengembalikan database dari snapshot R2 terbaru. |
 | **Sinkronisasi DNS** | `./scripts/sync-cloudflare-dns.sh prod` | Cek dan sinkronkan A-Record domain ke IP VPS di Cloudflare. |
 | **Kirim Notifikasi** | `./scripts/notify.sh info "Judul" "Pesan"` | Mengirim broadcast manual ke Discord & Telegram. |
