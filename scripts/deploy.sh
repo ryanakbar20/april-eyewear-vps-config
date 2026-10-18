@@ -181,17 +181,21 @@ fi
 echo "⚡ 7. Menginstal dependensi produksi, migrasi database & reload PM2 di server..."
 $SSH_CMD << EOF
   set -e
+  # Migrasi memakai riwayat di prisma/migrations (`migrate deploy`), bukan `db push --accept-data-loss`:
+  # db push bisa menghapus kolom/tabel tanpa peringatan dan tidak punya jalan kembali.
+  # Database yang sudah berisi data tapi belum punya tabel _prisma_migrations perlu di-baseline
+  # sekali saja lewat scripts/baseline-migrations.sh.
   echo "--> Installing production dependencies & migrating Main Service..."
   cd ${DEPLOY_DIR}/april-eyewear-main-service
   npm install --omit=dev --no-audit --no-fund
   npx prisma generate
-  npx prisma db push --accept-data-loss
+  npx prisma migrate deploy
 
   echo "--> Installing production dependencies & migrating Shipment Service..."
   cd ${DEPLOY_DIR}/april-eyewear-shipment-service
   npm install --omit=dev --no-audit --no-fund
   npx prisma generate
-  npx prisma db push --accept-data-loss
+  npx prisma migrate deploy
 
   echo "--> Reloading PM2 services with zero downtime..."
   pm2 reload ${DEPLOY_DIR}/${REMOTE_ECOSYSTEM} --update-env || pm2 start ${DEPLOY_DIR}/${REMOTE_ECOSYSTEM}
