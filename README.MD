@@ -18,7 +18,8 @@ Repositori ini berisi seluruh konfigurasi infrastruktur, skrip otomasi *provisio
 9. [Langkah 7: Otomatisasi Backup Database ke Cloudflare R2](#langkah-7-otomatisasi-backup-database-ke-cloudflare-r2)
 10. [Langkah 8: Setup CI/CD Otomatis via GitHub Actions](#langkah-8-setup-cicd-otomatis-via-github-actions)
 11. [Langkah 9: Migrasi Database & Versi Node](#langkah-9-migrasi-database--versi-node)
-12. [Cheat-Sheet Perintah Operasional Sehari-hari](#cheat-sheet-perintah-operasional-sehari-hari)
+12. [Langkah 10: Rotasi Kredensial & Pemindaian Rahasia](#langkah-10-rotasi-kredensial--pemindaian-rahasia)
+13. [Cheat-Sheet Perintah Operasional Sehari-hari](#cheat-sheet-perintah-operasional-sehari-hari)
 
 ---
 
@@ -339,6 +340,29 @@ Verifikasi cepat bahwa native module sehat: `node -e "require('bcrypt').hash('uj
 
 ---
 
+## Langkah 10: Rotasi Kredensial & Pemindaian Rahasia
+
+Beberapa nilai pernah ikut ter-commit lewat `dev/*.env.example` / `prod/*.env.example`, dan
+`JWT_SECRET` dev sempat memakai nilai yang bisa ditebak (`asdsda…`) padahal `dev-api` terbuka publik —
+artinya token staf bisa dipalsukan. Keduanya sudah ditangani:
+
+- `JWT_SECRET` dan `JWT_REFRESH_SECRET` dev sudah diganti dengan nilai acak 64 karakter. Sesi lama
+  menjadi tidak valid (semua pengguna dev perlu login ulang); token yang ditandatangani kunci lama
+  sekarang ditolak dengan 401.
+- Rincian kredensial lain yang perlu dirotasi, langkah per langkah, **dan checklist kredensial
+  iPaymu produksi** ada di [`docs/SECRET-ROTATION.md`](docs/SECRET-ROTATION.md).
+- Ada dua temuan keamanan yang belum ditutup dan tercatat di dokumen itu: handshake kiosk belum
+  memverifikasi `hmacSignature`, dan nilai rahasia masih ada di riwayat git.
+
+**Periksa sebelum rilis** (memeriksa file yang dilacak git di keempat repo, exit code 1 kalau ada
+temuan):
+
+```bash
+./scripts/scan-secrets.sh
+```
+
+---
+
 ## Cheat-Sheet Perintah Operasional Sehari-hari
 
 Jalankan perintah ini langsung dari terminal lokal Anda di folder `april-eyewear-vps-config`:
@@ -354,6 +378,8 @@ Jalankan perintah ini langsung dari terminal lokal Anda di folder `april-eyewear
 | **Uji Backup Bisa Di-restore** | `./scripts/server-verify-restore.sh` *(di VPS)* | Restore snapshot terbaru ke DB sementara, bandingkan jumlah tabel & baris, lalu hapus DB sementara. |
 | **Baseline Migrasi (sekali saja)** | `./scripts/baseline-migrations.sh dev` | Menandai `0_init` sebagai sudah diterapkan pada DB lama hasil `db push`. |
 | **Status Migrasi** | `ssh ... 'npx prisma migrate status'` | Memastikan tidak ada migrasi tertunda / drift. |
+| **Pindai Rahasia** | `./scripts/scan-secrets.sh` | Memeriksa file yang dilacak git di keempat repo; exit 1 kalau ada kredensial. |
+| **Rotasi Kredensial** | lihat `docs/SECRET-ROTATION.md` | Daftar kredensial yang harus dirotasi + checklist iPaymu produksi. |
 | **Restore Database** | `./scripts/restore-db.sh prod latest` | Mengembalikan database dari snapshot R2 terbaru. |
 | **Sinkronisasi DNS** | `./scripts/sync-cloudflare-dns.sh prod` | Cek dan sinkronkan A-Record domain ke IP VPS di Cloudflare. |
 | **Kirim Notifikasi** | `./scripts/notify.sh info "Judul" "Pesan"` | Mengirim broadcast manual ke Discord & Telegram. |
