@@ -250,7 +250,7 @@ server {
     location /api/v1/shipments/ {
         limit_req zone=api_general burst=30 nodelay;
 
-        proxy_pass http://shipment_backend;
+        proxy_pass http://shipment_backend/shipments/;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
