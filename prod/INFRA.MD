@@ -247,6 +247,18 @@ server {
     }
 
     # 3. Shipment Service Reverse Proxy
+    #    Webhook Biteship wajib ke main-service (two-way sync order).
+    location = /api/v1/shipments/webhook {
+        limit_req zone=api_general burst=30 nodelay;
+        proxy_pass http://main_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $http_cf_connecting_ip;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location /api/v1/shipments/ {
         limit_req zone=api_general burst=30 nodelay;
 
