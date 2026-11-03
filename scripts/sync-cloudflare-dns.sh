@@ -14,12 +14,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Load .env
-if [ -f "${CONFIG_DIR}/.env" ]; then
-  export $(grep -v '^#' "${CONFIG_DIR}/.env" | xargs)
-fi
-
 TARGET_ARG=${1:-"dev"}
+
+# Sumber konfigurasi: Infisical (<env>:/infra).
+# shellcheck source=./infisical-lib.sh
+. "${SCRIPT_DIR}/infisical-lib.sh"
+case "${TARGET_ARG}" in
+  prod | dev) infisical_load_infra "${TARGET_ARG}" ;;
+  *) infisical_load_infra "${INFISICAL_DEFAULT_ENV}" ;;
+esac
 
 if [ "$TARGET_ARG" = "prod" ]; then
   DOMAIN="${PROD_API_DOMAIN:-api.aprileyewear.com}"

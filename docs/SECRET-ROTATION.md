@@ -40,19 +40,20 @@ Beberapa nilai pernah masuk ke `dev/*.env.example` dan `prod/*.env.example`, jad
 
 ## 3. Cara rotasi
 
-Aturan umum: **generate nilai baru → pasang di dua sisi (penyedia + `.env`) → deploy → verifikasi →
+Aturan umum: **generate nilai baru → pasang di dua sisi (penyedia + Infisical) → deploy → verifikasi →
 baru cabut nilai lama.** Urutan ini menghindari jendela waktu di mana layanan menolak trafik yang sah.
 
-Semua `.env` di server memiliki permission `600` dan tidak dilacak git. Untuk mengubah nilai di dev,
-sunting `dev/main.env` / `dev/shipment.env` di laptop, lalu `./scripts/deploy.sh dev` (deploy
-mengunggah `.env` tersebut ke server).
+Nilai env kini tersimpan di **Infisical**, bukan file `.env` di repo. Untuk mengubah nilai dev, sunting
+secret di Infisical UI (folder `dev:/main-service` / `dev:/shipment-service`), lalu
+`./scripts/deploy.sh dev` — deploy menarik secret dari Infisical dan menaruh `.env` (permission `600`,
+tidak dilacak git) di server.
 
 ### 3.1 `JWT_SECRET` dan `JWT_REFRESH_SECRET`
 
 ```bash
 openssl rand -base64 48
 ```
-1. Pasang di `dev/main.env` (dan `prod/main.env` saat rilis).
+1. Pasang di Infisical: `dev:/main-service` (dan `prod:/main-service` saat rilis).
 2. Deploy.
 3. **Konsekuensi:** semua sesi aktif menjadi tidak valid, pengguna harus login ulang. Lakukan pada
    jam sepi.
@@ -61,13 +62,13 @@ openssl rand -base64 48
 ### 3.2 `BITESHIP_WEBHOOK_SECRET`
 
 1. Ubah rahasia di dashboard Biteship (URL webhook atau header).
-2. Nilai ini harus **sama** di dua tempat: `dev/main.env` dan `dev/shipment.env`.
+2. Nilai ini harus **sama** di dua folder Infisical: `dev:/main-service` dan `dev:/shipment-service`.
 3. Deploy, lalu pastikan webhook dengan header lama ditolak (401) dan yang baru diterima (200).
 
 ### 3.3 `WA_CLOUD_API_TOKEN`
 
 1. Buat token baru untuk System User di Meta Business Suite, lalu cabut yang lama.
-2. Pasang di `dev/main.env`, deploy.
+2. Pasang di `dev:/main-service` (Infisical), deploy.
 3. Verifikasi: kirim satu notifikasi uji lewat antrean WhatsApp dan pastikan terkirim.
 
 ### 3.4 `FIREBASE_PRIVATE_KEY`
@@ -87,8 +88,8 @@ openssl rand -base64 48
 ### 3.5 `SHIPMENT_INTERNAL_TOKEN`
 
 Rahasia bersama antara main service dan shipment service (main memakainya untuk memanggil shipment).
-Generate dengan `openssl rand -hex 32`, pasang di **kedua** `.env`, deploy, lalu pastikan endpoint
-internal masih berjalan (rates/area).
+Generate dengan `openssl rand -hex 32`, pasang di **kedua** folder (`dev:/main-service` &
+`dev:/shipment-service`), deploy, lalu pastikan endpoint internal masih berjalan (rates/area).
 
 ## 4. Kredensial produksi iPaymu (checklist sebelum rilis)
 
@@ -118,5 +119,5 @@ siapa pun yang punya akses repo. Pilihan:
   repo-nya sensitif atau nilainya tidak bisa dirotasi. Perlu keputusan eksplisit, bukan langkah rutin.
 
 Karena nilainya bocor lewat file contoh, kebiasaan yang mencegah terulang: `.env.example` **hanya**
-berisi placeholder (`your_…`, kosong), dan nilai asli selalu di `.env` yang di-ignore
-(`.gitignore` sudah memuat `**/*.env` di repo infra).
+berisi placeholder (`your_…`, kosong), dan nilai asli selalu disimpan di **Infisical** (env service)
+atau di `.env` lokal yang di-ignore (kredensial infra lama).

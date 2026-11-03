@@ -47,62 +47,40 @@ Sebelum memulai, pastikan Anda memiliki:
 
 ---
 
-## Langkah 1: Menyiapkan File Kredensial (`.env`)
+## Langkah 1: Menyiapkan Kredensial (Infisical)
 
-Di komputer lokal Anda, salin template `.env.example` menjadi `.env`:
+> 🔐 **Semua env (local, VPS dev, VPS prod) kini bersumber dari Infisical.**
+> Panduan lengkap ada di [`docs/INFISICAL.md`](docs/INFISICAL.md).
+
+Satu-satunya kredensial yang perlu ada di komputer lokal adalah **machine identity**
+Infisical (Universal Auth):
 
 ```bash
 cd april-eyewear-vps-config
-cp .env.example .env
+cp .infisical.env.example .infisical.env
+# isi INFISICAL_PROJECT_ID, INFISICAL_CLIENT_ID, INFISICAL_CLIENT_SECRET
+npm install -g @infisical/cli
 ```
 
-Buka `.env` dan lengkapi variabel berikut:
-```ini
-# 1. Cloudflare R2 (Backup Database)
-R2_ACCOUNT_ID=your_cloudflare_account_id
-R2_ACCESS_KEY_ID=your_r2_access_key_id
-R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
-R2_BUCKET_BACKUP=april-eyewear-backups
-R2_S3_ENDPOINT=https://your_cloudflare_account_id.r2.cloudflarestorage.com
+Konfigurasi infra (R2, Cloudflare, VPS IP, DB, alerting) dan env tiap service
+ditarik otomatis dari Infisical saat deploy/start — tidak lagi ditulis manual ke `.env`.
 
-# 2. Cloudflare DNS Automation
-CLOUDFLARE_API_TOKEN=your_cloudflare_dns_token
-
-# 3. Target VPS Production
-PROD_VPS_IP=103.xxx.xxx.xxx
-PROD_VPS_USER=ubuntu
-PROD_VPS_SSH_KEY_PATH=~/.ssh/id_rsa
-PROD_DB_PASSWORD=PasswordDatabaseKuat123!
-
-# 4. Target VPS Development
-DEV_VPS_IP=103.150.117.15
-DEV_VPS_USER=ubuntu
-DEV_VPS_SSH_KEY_PATH=./scripts/id_rsa.pem
-DEV_DB_PASSWORD=PasswordDatabaseDev123!
-```
-
-### Menyiapkan Environment Service (Main & Shipment) untuk Dev & Prod
-Setiap service (`main-service` dan `shipment-service`) memiliki variabel kredensial yang berbeda antara **Dev** dan **Prod** (seperti database URL, payment gateway sandbox vs production, biteship API key, dan URL callback).
-
-File konfigurasi disimpan di dalam folder masing-masing lingkungan:
+### Environment Service (Main & Shipment) untuk Dev & Prod
+Setiap service punya variabel berbeda antara **Dev** dan **Prod** (database URL, payment gateway sandbox vs production, biteship API key, URL callback). Semua nilai itu kini hidup di Infisical — **tidak ada lagi file `.env` seed di repo ini**:
 
 ```bash
-# 1. Konfigurasi Lingkungan Development (Otomatis dipakai saat ./scripts/deploy.sh dev)
-dev/
-├── main.env                 # Kredensial aktif Main Service Dev (Auto-deploy ke VPS Dev)
-├── main.env.example         # Template acuan variabel Main Service Dev
-├── shipment.env             # Kredensial aktif Shipment Service Dev (Auto-deploy ke VPS Dev)
-└── shipment.env.example     # Template acuan variabel Shipment Service Dev
+# Infisical (sumber kebenaran):
+dev : /local/main-service, /local/shipment-service, /local/website, /local/smartfit-kiosk,
+      /main-service, /shipment-service, /website, /smartfit-kiosk, /infra
+prod: /main-service, /shipment-service, /website, /smartfit-kiosk, /infra
 
-# 2. Konfigurasi Lingkungan Production (Otomatis dipakai saat ./scripts/deploy.sh prod)
-prod/
-├── main.env                 # Salin dari main.env.example dan isi kredensial live produksi
-├── main.env.example         # Template acuan variabel Main Service Prod
-├── shipment.env             # Salin dari shipment.env.example dan isi kredensial live produksi
-└── shipment.env.example     # Template acuan variabel Shipment Service Prod
+# Yang tetap ada di repo hanya template variabel (tanpa nilai asli):
+dev/main.env.example, dev/shipment.env.example,
+prod/main.env.example, prod/shipment.env.example
 ```
 
-> 🔒 **Keamanan:** File `*.env` di dalam folder `dev/` dan `prod/` sudah otomatis diabaikan oleh `.gitignore` sehingga aman dan tidak akan ter-commit ke GitHub.
+> 🔒 **Keamanan:** hanya `.infisical.env` (kredensial machine identity) yang disimpan
+> lokal, dan sudah di-ignore `.gitignore`. Yang di-commit hanya template `*.env.example`.
 
 
 ---
@@ -369,10 +347,12 @@ Jalankan perintah ini langsung dari terminal lokal Anda di folder `april-eyewear
 
 | Kebutuhan | Perintah | Penjelasan |
 | :--- | :--- | :--- |
+| **Render Env dari Infisical** | `./scripts/infisical-export.sh dev /main-service /tmp/main.env` | Menarik satu folder env dari Infisical (format dotenv). |
+| **Push Env ke Infisical** | `./scripts/infisical-push.sh dev /main-service file.env` | Menyimpan satu file `.env` ke satu folder Infisical. |
 | **Cek Status Server** | `./scripts/server-status.sh prod` | Menampilkan uptime, RAM, Swap, CPU, status PM2, dan port aktif. |
 | **Cek Status Dev** | `./scripts/server-status.sh dev` | Memantau konsumsi RAM pada server 1GB. |
-| **Deploy Production** | `./scripts/deploy.sh prod` | Build lokal & deploy zero-downtime ke Prod. |
-| **Deploy Development** | `./scripts/deploy.sh dev` | Build lokal & deploy mode fork ke Dev. |
+| **Deploy Production** | `./scripts/deploy.sh prod` | Build lokal, tarik env dari Infisical & deploy zero-downtime ke Prod. |
+| **Deploy Development** | `./scripts/deploy.sh dev` | Build lokal, tarik env dari Infisical & deploy mode fork ke Dev. |
 | **Cek Healthcheck API** | `curl -s https://api.aprileyewear.com/api/v1/health` | Menampilkan latency database dan status memori backend. |
 | **Backup DB ke R2** | `./scripts/backup-r2.sh prod` | Dump PostgreSQL & push ke Cloudflare R2. |
 | **Uji Backup Bisa Di-restore** | `./scripts/server-verify-restore.sh` *(di VPS)* | Restore snapshot terbaru ke DB sementara, bandingkan jumlah tabel & baris, lalu hapus DB sementara. |

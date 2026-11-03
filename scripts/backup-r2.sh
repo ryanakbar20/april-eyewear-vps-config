@@ -16,12 +16,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Load .env
-if [ -f "${CONFIG_DIR}/.env" ]; then
-  export $(grep -v '^#' "${CONFIG_DIR}/.env" | xargs)
-fi
-
 TARGET_ENV=${1:-"dev"}
+
+# Sumber konfigurasi: Infisical (<env>:/infra).
+# shellcheck source=./infisical-lib.sh
+. "${SCRIPT_DIR}/infisical-lib.sh"
+infisical_load_infra "${TARGET_ENV}"
 
 if [ "$TARGET_ENV" = "prod" ]; then
   VPS_IP="${PROD_VPS_IP}"
@@ -36,7 +36,7 @@ else
 fi
 
 if [ -z "$VPS_IP" ]; then
-  echo "❌ IP VPS untuk ${TARGET_ENV} belum diisi di ${CONFIG_DIR}/.env!"
+  echo "❌ IP VPS untuk ${TARGET_ENV} belum diisi di Infisical (${TARGET_ENV}:/infra)!"
   exit 1
 fi
 

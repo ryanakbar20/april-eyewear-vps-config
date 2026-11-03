@@ -5,6 +5,12 @@
 # Cara pakai:
 #   ./scripts/deploy.sh dev
 #   ./scripts/deploy.sh prod
+#
+# Sumber env: Infisical (project "April Eyewear").
+#  - Bootstrap kredensial machine identity: .infisical.env (lokal, gitignored)
+#  - Konfigurasi infra:   <env>:/infra
+#  - Env service (main):  <env>:/main-service
+#  - Env service (ship):  <env>:/shipment-service
 # ==============================================================================
 
 set -e
@@ -16,16 +22,18 @@ ROOT_DIR="$(cd "${CONFIG_DIR}/.." && pwd)"
 # Pastikan Node & npm tersedia (nvm / Homebrew) agar proses build lokal dapat berjalan
 export PATH="$HOME/.nvm/versions/node/$(ls "$HOME/.nvm/versions/node" 2>/dev/null | tail -n 1)/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-# Load .env
-if [ -f "${CONFIG_DIR}/.env" ]; then
-  # Export non-comment lines
-  export $(grep -v '^#' "${CONFIG_DIR}/.env" | xargs)
-else
-  echo "❌ File .env tidak ditemukan di ${CONFIG_DIR}/.env!"
-  exit 1
-fi
-
 TARGET_ENV=${1:-"dev"}
+
+# ==============================================================================
+# Sumber konfigurasi: Infisical
+# ==============================================================================
+# shellcheck source=./infisical-lib.sh
+. "${SCRIPT_DIR}/infisical-lib.sh"
+infisical_login
+
+echo "🔐 Menarik konfigurasi infra dari Infisical (env: ${TARGET_ENV}:/infra)..."
+infisical_load_infra "${TARGET_ENV}"
+
 
 if [ "$TARGET_ENV" = "prod" ]; then
   VPS_IP="${PROD_VPS_IP}"
@@ -49,7 +57,7 @@ else
 fi
 
 if [ -z "$VPS_IP" ]; then
-  echo "❌ IP VPS untuk ${TARGET_ENV} belum diisi di ${CONFIG_DIR}/.env!"
+  echo "❌ IP VPS untuk ${TARGET_ENV} belum diisi di Infisical (${TARGET_ENV}:/infra)!"
   exit 1
 fi
 
@@ -92,7 +100,7 @@ if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
     echo "⚠️  Peringatan: Sinkronisasi DNS Cloudflare gagal, melanjutkan proses deployment aplikasi..."
   }
 else
-  echo "ℹ️  CLOUDFLARE_API_TOKEN tidak diatur di .env. Melewati sinkronisasi DNS otomatis."
+  echo "ℹ️  CLOUDFLARE_API_TOKEN tidak diatur di Infisical (/infra). Melewati sinkronisasi DNS otomatis."
 fi
 
 # 1. Build Main Service Secara Lokal
@@ -124,21 +132,12 @@ rsync -avz -e "${RSYNC_SSH}" --delete \
   $([ -d "${ROOT_DIR}/april-eyewear-main-service/scripts" ] && echo "${ROOT_DIR}/april-eyewear-main-service/scripts" || true) \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/"
 
-# Siapkan .env Main Service di remote
-TARGET_MAIN_ENV="${CONFIG_DIR}/${TARGET_ENV}/main.env"
-if [ -f "$TARGET_MAIN_ENV" ]; then
-  echo "⚙️  Mengunggah .env Main Service dari ${TARGET_ENV}/main.env..."
-  $SCP_CMD "$TARGET_MAIN_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/.env"
-else
-  REMOTE_HAS_MAIN_ENV=$($SSH_CMD "[ -f ${DEPLOY_DIR}/april-eyewear-main-service/.env ] && echo 'YES' || echo 'NO'")
-  if [ "$REMOTE_HAS_MAIN_ENV" = "NO" ]; then
-    echo "❌ File konfigurasi ${TARGET_ENV}/main.env tidak ditemukan di lokal dan belum ada di VPS!"
-    echo "   Salin ${TARGET_ENV}/main.env.example menjadi ${TARGET_ENV}/main.env dan sesuaikan nilainya."
-    exit 1
-  else
-    echo "ℹ️  Menggunakan .env Main Service yang sudah ada di server."
-  fi
-fi
+# Render .env Main Service dari Infisical lalu unggah ke remote
+echo "⚙️  Render .env Main Service dari Infisical (${TARGET_ENV}:/main-service)..."
+TMP_MAIN_ENV="$(mktemp)"
+bash "${SCRIPT_DIR}/infisical-export.sh" "${TARGET_ENV}" /main-service "${TMP_MAIN_ENV}"
+$SCP_CMD "$TMP_MAIN_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/.env"
+rm -f "$TMP_MAIN_ENV"
 
 # 5. Sync Shipment Service Artifacts
 echo "📤 5. Mengirim artefak Shipment Service ke VPS..."
@@ -151,21 +150,12 @@ rsync -avz -e "${RSYNC_SSH}" --delete \
   "${ROOT_DIR}/april-eyewear-shipment-service/prisma" \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/"
 
-# Siapkan .env Shipment Service di remote
-TARGET_SHIP_ENV="${CONFIG_DIR}/${TARGET_ENV}/shipment.env"
-if [ -f "$TARGET_SHIP_ENV" ]; then
-  echo "⚙️  Mengunggah .env Shipment Service dari ${TARGET_ENV}/shipment.env..."
-  $SCP_CMD "$TARGET_SHIP_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/.env"
-else
-  REMOTE_HAS_SHIP_ENV=$($SSH_CMD "[ -f ${DEPLOY_DIR}/april-eyewear-shipment-service/.env ] && echo 'YES' || echo 'NO'")
-  if [ "$REMOTE_HAS_SHIP_ENV" = "NO" ]; then
-    echo "❌ File konfigurasi ${TARGET_ENV}/shipment.env tidak ditemukan di lokal dan belum ada di VPS!"
-    echo "   Salin ${TARGET_ENV}/shipment.env.example menjadi ${TARGET_ENV}/shipment.env dan sesuaikan nilainya."
-    exit 1
-  else
-    echo "ℹ️  Menggunakan .env Shipment Service yang sudah ada di server."
-  fi
-fi
+# Render .env Shipment Service dari Infisical lalu unggah ke remote
+echo "⚙️  Render .env Shipment Service dari Infisical (${TARGET_ENV}:/shipment-service)..."
+TMP_SHIP_ENV="$(mktemp)"
+bash "${SCRIPT_DIR}/infisical-export.sh" "${TARGET_ENV}" /shipment-service "${TMP_SHIP_ENV}"
+$SCP_CMD "$TMP_SHIP_ENV" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/.env"
+rm -f "$TMP_SHIP_ENV"
 
 # 6. Kirim PM2 Ecosystem Config & Nginx Config
 echo "📤 6. Mengirim file konfigurasi PM2..."

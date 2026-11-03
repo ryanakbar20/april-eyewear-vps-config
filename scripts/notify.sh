@@ -14,11 +14,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-if [ -f "${CONFIG_DIR}/.env" ]; then
-  export $(grep -v '^#' "${CONFIG_DIR}/.env" | xargs)
-fi
-
 STATUS_TYPE=${1:-"info"}
+
+# Sumber konfigurasi: Infisical (<env>:/infra), kecuali sudah diwarisi dari pemanggil.
+if [ -z "${DISCORD_WEBHOOK_URL:-}" ] && [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && [ -f "${CONFIG_DIR}/.infisical.env" ]; then
+  # shellcheck source=./infisical-lib.sh
+  . "${SCRIPT_DIR}/infisical-lib.sh"
+  infisical_load_infra "${INFISICAL_DEFAULT_ENV}" || true
+fi
 TITLE=${2:-"Notifikasi April Eyewear"}
 MESSAGE=${3:-""}
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S WIB")

@@ -14,16 +14,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Load environment variables
-if [ -f "${CONFIG_DIR}/.env" ]; then
-  export $(grep -v '^#' "${CONFIG_DIR}/.env" | xargs)
-else
-  echo "❌ File .env tidak ditemukan di ${CONFIG_DIR}/.env!"
-  exit 1
-fi
-
 TARGET_ENV=${1:-"dev"}
 BACKUP_SOURCE=${2:-"latest"}
+
+# Sumber konfigurasi: Infisical (<env>:/infra).
+# shellcheck source=./infisical-lib.sh
+. "${SCRIPT_DIR}/infisical-lib.sh"
+infisical_load_infra "${TARGET_ENV}"
 
 if [ "$TARGET_ENV" = "prod" ]; then
   VPS_IP="${PROD_VPS_IP}"
