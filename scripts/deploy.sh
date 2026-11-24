@@ -194,6 +194,28 @@ $SSH_CMD << EOF
   pm2 status
 EOF
 
+# 8. Pasang PM2 auto-recovery guard (cron tiap 2 menit)
+#    Memulihkan layanan otomatis bila app PM2 mati (mis. setelah reboot) atau health check gagal.
+echo "🛡️ 8. Memasang PM2 auto-recovery guard..."
+$SCP_CMD "${SCRIPT_DIR}/pm2-guard.sh" "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/pm2-guard.sh"
+
+if [ "$TARGET_ENV" = "prod" ]; then
+  GUARD_EXPECTED="april-main-service april-shipment-service"
+else
+  GUARD_EXPECTED="april-main-dev april-shipment-dev"
+fi
+GUARD_ENV="EXPECTED_APPS=\"${GUARD_EXPECTED}\" ECOSYSTEM=\"${DEPLOY_DIR}/${REMOTE_ECOSYSTEM}\" MAIN_URL=\"http://127.0.0.1:3000/api/v1/health\" SHIPMENT_URL=\"http://127.0.0.1:3002/\""
+GUARD_CRON="*/2 * * * * ${GUARD_ENV} /home/${VPS_USER}/bin/pm2-guard.sh >> /home/${VPS_USER}/logs/pm2-guard.log 2>&1"
+
+$SSH_CMD << EOF
+  set -e
+  mkdir -p /home/${VPS_USER}/bin /home/${VPS_USER}/logs
+  install -m 0755 "${DEPLOY_DIR}/pm2-guard.sh" "/home/${VPS_USER}/bin/pm2-guard.sh"
+  ( crontab -l 2>/dev/null | grep -v 'pm2-guard.sh'; echo '${GUARD_CRON}' ) | crontab -
+  echo "--> Guard installed; cron:"
+  crontab -l | grep 'pm2-guard.sh' || true
+EOF
+
 echo "=============================================================================="
 echo "🩺 Memeriksa Status Layanan Pasca-Deploy..."
 echo "=============================================================================="
