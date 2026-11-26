@@ -86,6 +86,40 @@ SSH_CMD="ssh -p ${VPS_PORT} ${SSH_KEY_OPT} ${VPS_USER}@${VPS_IP}"
 RSYNC_SSH="ssh -p ${VPS_PORT} ${SSH_KEY_OPT}"
 SCP_CMD="scp -P ${VPS_PORT} ${SSH_KEY_OPT}"
 
+# ─── Sanity-check: pastikan dist di server benar-benar sama dengan lokal ───────
+# Mendeteksi sync tak lengkap (rsync terputus, atau `dist` lokal terhapus saat build
+# paralel menulis folder yang sama). Dijalankan SEBELUM reload PM2 supaya aplikasi
+# tidak pernah di-restart dengan artefak yang bolong (pernah menyebabkan crash 502).
+verify_dist_sync() {
+  local label="$1" local_dir="$2" remote_dir="$3"
+  local local_list remote_list
+
+  local_list="$(mktemp)"
+  remote_list="$(mktemp)"
+
+  ( cd "${local_dir}" && find . -type f -name '*.js' ! -name '._*' | sort ) > "${local_list}"
+  $SSH_CMD "cd '${remote_dir}' && find . -type f -name '*.js' ! -name '._*'" 2>/dev/null \
+    | grep '^\./' | sort > "${remote_list}"
+
+  if diff -q "${local_list}" "${remote_list}" >/dev/null; then
+    echo "✅ ${label}: dist sinkron ($(wc -l < "${local_list}" | tr -d ' ') berkas .js)."
+    rm -f "${local_list}" "${remote_list}"
+    return 0
+  fi
+
+  echo "❌ ${label}: dist di server TIDAK sinkron dengan lokal — deploy dibatalkan sebelum reload."
+  if [ -s "${local_list}" ]; then
+    echo "   Berkas yang HILANG di server (maks 20):"
+    comm -23 "${local_list}" "${remote_list}" | head -20 | sed 's/^/     /'
+  fi
+  if [ -s "${remote_list}" ]; then
+    echo "   Berkas BERLEBIH di server (maks 20):"
+    comm -13 "${local_list}" "${remote_list}" | head -20 | sed 's/^/     /'
+  fi
+  rm -f "${local_list}" "${remote_list}"
+  return 1
+}
+
 echo "=============================================================================="
 echo "🚀 Memulai Deployment April Eyewear [Target: ${TARGET_ENV}]"
 echo "   Server:  ${VPS_USER}@${VPS_IP}:${VPS_PORT}"
@@ -132,6 +166,11 @@ rsync -avz -e "${RSYNC_SSH}" --delete \
   $([ -d "${ROOT_DIR}/april-eyewear-main-service/scripts" ] && echo "${ROOT_DIR}/april-eyewear-main-service/scripts" || true) \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-main-service/"
 
+if ! verify_dist_sync "Main Service" "${ROOT_DIR}/april-eyewear-main-service/dist" "${DEPLOY_DIR}/april-eyewear-main-service/dist"; then
+  echo "🛑 Deploy dihentikan: sinkronisasi artefak Main Service tidak lengkap. Coba jalankan ulang."
+  exit 1
+fi
+
 # Render .env Main Service dari Infisical lalu unggah ke remote
 echo "⚙️  Render .env Main Service dari Infisical (${TARGET_ENV}:/main-service)..."
 TMP_MAIN_ENV="$(mktemp)"
@@ -149,6 +188,11 @@ rsync -avz -e "${RSYNC_SSH}" --delete \
   "${ROOT_DIR}/april-eyewear-shipment-service/package-lock.json" \
   "${ROOT_DIR}/april-eyewear-shipment-service/prisma" \
   "${VPS_USER}@${VPS_IP}:${DEPLOY_DIR}/april-eyewear-shipment-service/"
+
+if ! verify_dist_sync "Shipment Service" "${ROOT_DIR}/april-eyewear-shipment-service/dist" "${DEPLOY_DIR}/april-eyewear-shipment-service/dist"; then
+  echo "🛑 Deploy dihentikan: sinkronisasi artefak Shipment Service tidak lengkap. Coba jalankan ulang."
+  exit 1
+fi
 
 # Render .env Shipment Service dari Infisical lalu unggah ke remote
 echo "⚙️  Render .env Shipment Service dari Infisical (${TARGET_ENV}:/shipment-service)..."
