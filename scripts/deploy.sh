@@ -211,7 +211,7 @@ $SSH_CMD << EOF
   set -e
   mkdir -p /home/${VPS_USER}/bin /home/${VPS_USER}/logs
   install -m 0755 "${DEPLOY_DIR}/pm2-guard.sh" "/home/${VPS_USER}/bin/pm2-guard.sh"
-  ( crontab -l 2>/dev/null | grep -v 'pm2-guard.sh'; echo '${GUARD_CRON}' ) | crontab -
+  ( crontab -l 2>/dev/null | grep -v 'pm2-guard.sh' || true; echo '${GUARD_CRON}' ) | crontab -
   echo "--> Guard installed; cron:"
   crontab -l | grep 'pm2-guard.sh' || true
 EOF
