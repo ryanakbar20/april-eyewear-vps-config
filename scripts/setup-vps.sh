@@ -41,10 +41,12 @@ else
   echo "ℹ️ Swap file sudah ada, lewati..."
 fi
 
-# 3. Install Node.js 20 LTS & PM2
-echo "🟢 3. Install Node.js 20 LTS & PM2..."
+# 3. Install Node.js 22 LTS & PM2
+# API memakai paket yang mensyaratkan Node >= 22 (firebase-admin, @google-cloud/storage).
+# Node 20 membuat unggah media & push notification gagal walau build lolos.
+echo "🟢 3. Install Node.js 22 LTS & PM2..."
 if ! command -v node &> /dev/null; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
 fi
 npm install -g pm2
